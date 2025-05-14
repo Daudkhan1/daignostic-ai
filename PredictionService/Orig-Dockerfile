@@ -1,0 +1,34 @@
+# Use the official Miniconda base image
+FROM continuumio/miniconda3:latest
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install system-level dependencies required by OpenCV
+RUN apt-get update && apt-get install -y libgl1-mesa-glx && apt-get clean
+
+# Copy the environment.yml file into the container
+COPY environment.yml /app/environment.yml
+
+# Create the Conda environment from environment.yml
+RUN conda env create -f /app/environment.yml && \
+    conda clean -afy
+
+# Set the default shell to always activate the Conda environment
+SHELL ["conda", "run", "-n", "pytorch", "/bin/bash", "-c"]
+
+# Update pip (if needed)
+RUN pip install --upgrade pip
+
+# Copy the entire project directory into the container
+COPY . /app
+
+# Install maanzai models pip package
+RUN pip install maanz_medical_ai_models-1.0.0-py3-none-any.whl --force-reinstall --upgrade
+
+# Expose the port that the FastAPI app will use
+EXPOSE 8000
+
+# Command to run the FastAPI app with Uvicorn
+WORKDIR /app/src
+CMD ["conda", "run", "--no-capture-output", "-n", "pytorch", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

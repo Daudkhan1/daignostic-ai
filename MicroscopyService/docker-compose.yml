@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   microscopy:
-    image: microscopy:latest
+    image: 831926608672.dkr.ecr.ap-south-1.amazonaws.com/microscopy:latest
     ports:
       - "8000:8000"
     restart: always
