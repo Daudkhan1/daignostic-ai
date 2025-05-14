@@ -76,9 +76,12 @@ jobs:
         run: |
           # Log in to ECR
           aws ecr get-login-password --region ${{ secrets.AMAZON_S3_REGION_NAME }} | docker login --username AWS --password-stdin ${{ secrets.ECR_URI }}
+         
+          # Go to the PredictionService directory
+          cd PredictionService
 
           # Build Docker image
-          docker build -t diagnostic-ai:latest -f PredictionService/Dockerfile .
+          docker build -t diagnostic-ai:latest .
 
           # Tag the image
           docker tag diagnostic-ai:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AMAZON_S3_REGION_NAME }}.amazonaws.com/diagnostic-ai:latest
