@@ -1,0 +1,154 @@
+name: Deploy to EC2 using AWS CLI
+
+on:
+  push:
+    branches:
+      - "master"
+
+jobs:
+  deploy-master:
+    name: Deploy to EC2 (Prod)
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 1.5 :) Build pip package
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Build Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools wheel build
+
+      - name: Build AIModels Package and Copy to Other Folders
+        working-directory: AIModels
+        run: |
+             python -m build
+             PACKAGE_PATH=$(ls dist/*.whl)
+             cp $PACKAGE_PATH ../GenAIService/backend/
+             cp $PACKAGE_PATH ../MicroscopyService/
+        shell: bash
+
+
+      # Step 2: Configure AWS CLI
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Step 4: Zip the Code
+      - name: Zip the Project
+        run: |
+          cd ./GenAIService/backend
+          zip -r ../../genai_app.zip . -x "*.git*" "*node_modules*" "*__pycache__*"
+          # Since we weere inside the GenAIService backend folder previously
+          cd ../../MicroscopyService
+          zip -r ../microscopy_app.zip . -x "*.git*" "*node_modules*" "*__pycache__*"
+
+      # Step 5: Upload the Code to S3
+      - name: Upload Code to S3
+        run: |
+          aws s3 cp genai_app.zip s3://diagnostic-images-bucket/deployments/genai_app.zip
+          aws s3 cp microscopy_app.zip s3://diagnostic-images-bucket/deployments/microscopy_app.zip
+
+      - name: Deploy & Run Docker on EC2 via SSM
+        run: |
+          # Send the SSM command and capture the command ID
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=instanceIds,Values=i-076fa21f9478dd6ce" \
+            --parameters "commands=[
+              'set -e',
+
+              'echo Downloading the latest code from S3...',
+              'aws s3 cp s3://diagnostic-images-bucket/deployments/genai_app.zip /home/ubuntu/genai_app.zip --region ${{ secrets.AWS_REGION }}',
+              'aws s3 cp s3://diagnostic-images-bucket/deployments/microscopy_app.zip /home/ubuntu/microscopy_app.zip --region ${{ secrets.AWS_REGION }}',
+
+              'echo Extracting GenAI code...',
+              'mkdir -p /home/ubuntu/genai_app',
+              'rm -rf /home/ubuntu/genai_app/*',
+              'unzip -o /home/ubuntu/genai_app.zip -d /home/ubuntu/genai_app',
+              'rm -f /home/ubuntu/genai_app.zip',
+
+              'echo Extracting Microscopy code...',
+              'mkdir -p /home/ubuntu/microscopy_app',
+              'rm -rf /home/ubuntu/microscopy_app/*',
+              'unzip -o /home/ubuntu/microscopy_app.zip -d /home/ubuntu/microscopy_app',
+              'rm -f /home/ubuntu/microscopy_app.zip',
+
+              'echo Removing old Docker containers and images...',
+              'docker-compose -f /home/ubuntu/microscopy_app/docker-compose.yml stop',
+              'docker-compose -f /home/ubuntu/genai_app/docker-compose.yml stop',
+
+              'echo Waiting for all containers to fully stop...',
+              'while [ -n \"$(docker ps -q)\" ]; do sleep 5; echo \"Waiting for containers to stop...\"; done',
+
+              'echo Do cleanup of dangling images containers networks...',
+              'docker system prune -f || true',
+
+              'echo Building GenAI Docker Image...',
+              'cd /home/ubuntu/genai_app',
+              'docker build -t genai-app:latest .',
+              'docker-compose up -d',
+
+              'echo Building Microscopy Docker image...',
+              'cd /home/ubuntu/microscopy_app',
+              'docker build -t microscopy:latest .',
+              'docker-compose up -d',
+
+              'docker system prune -f || true',
+              'echo Finished everything'
+            ]" \
+            --comment "Deploying new Docker image to EC2" \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Command.CommandId" --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for the command to complete
+          while true; do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id i-076fa21f9478dd6ce \
+              --region ${{ secrets.AWS_REGION }} \
+              --query "Status" --output text)
+
+            echo "Current Status: $STATUS"
+
+            if [ "$STATUS" = "Success" ]; then
+              echo "SSM Command completed successfully!"
+              break
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "SSM Command failed or was cancelled."
+              # Print error output
+              echo "Fetching command output..."
+              aws ssm get-command-invocation \
+                --command-id $COMMAND_ID \
+                --instance-id i-076fa21f9478dd6ce \
+                --region ${{ secrets.AWS_REGION }} \
+                --query "StandardErrorContent" \
+                --output text
+
+              # Optionally print standard output too
+              echo "Fetching standard output..."
+              aws ssm get-command-invocation \
+                --command-id $COMMAND_ID \
+                --instance-id i-076fa21f9478dd6ce \
+                --region ${{ secrets.AWS_REGION }} \
+                --query "StandardOutputContent" \
+                --output text
+
+              exit 1
+            else
+              # Wait before checking again
+              sleep 10
+            fi
+          done

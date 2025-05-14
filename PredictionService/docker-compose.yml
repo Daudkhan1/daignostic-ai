@@ -1,0 +1,23 @@
+services:
+  diagnostic-ai:
+    image: diagnostic-ai:latest  # Your model's Dockerfile
+    ports:
+      - "8000:8000"  # Expose port 8000 to the host
+    environment:
+      - DATA_MODEL_PATH=/app/AIModels/data/weights/model_weights_od.pth
+      - DATA_RADIOLOGY_MODEL_PATH=/app/AIModels/data/weights/radiology_yolo.pth
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    runtime: nvidia
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge

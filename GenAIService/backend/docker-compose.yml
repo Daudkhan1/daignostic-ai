@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  genai-app:
+    image: genai-app:latest
+    ports:
+      - "8001:8001"
+    restart: always

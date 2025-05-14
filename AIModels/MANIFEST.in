@@ -1,0 +1,2 @@
+recursive-include maanz_medical_ai_models *.pth *.pt
+

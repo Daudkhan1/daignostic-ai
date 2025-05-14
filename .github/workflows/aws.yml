@@ -1,0 +1,196 @@
+name: Deploy to EC2 using AWS CLI
+
+on:
+  push:
+    branches:
+      - "master"
+
+jobs:
+  deploy-master:
+    name: Deploy to EC2 (Prod)
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 1.5 :) Build pip package
+      - name: Set Up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Build Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools wheel build
+
+      - name: Build AIModels Package and Copy to Other Folders
+        working-directory: AIModels
+        run: |
+             python -m build
+             PACKAGE_PATH=$(ls dist/*.whl)
+             cp $PACKAGE_PATH ../PredictionService/
+        shell: bash
+
+
+      # Step 2: Configure AWS CLI
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Step 3: Ensure EC2 Instance is Running
+      - name: Start EC2 if stopped and wait until running
+        run: |
+          INSTANCE_ID="i-043c8050d6c02f6b4"
+
+          # Get the instance state correctly
+          STATUS=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].State.Name" --output text)
+
+          echo "EC2 Instance Status: $STATUS"
+
+          if [ "$STATUS" == "stopped" ]; then
+            echo "Starting EC2 instance $INSTANCE_ID..."
+            aws ec2 start-instances --instance-ids $INSTANCE_ID
+
+            echo "Waiting for instance to be running..."
+            aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+
+            echo "EC2 instance is now running."
+          elif [ "$STATUS" == "pending" ]; then
+            echo "Instance is in pending state. Waiting for it to be running..."
+            aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+            echo "EC2 instance is now running."
+          else
+            echo "EC2 instance is already in state: $STATUS."
+          fi
+
+      # Step 4: Zip the Code
+      - name: Zip the Project
+        run: |
+          cd ./PredictionService
+          zip -r ../prediction_app.zip . -x "*.git*" "*node_modules*" "*__pycache__*"
+          cd ../ # Don't know if this is necessary or not
+
+      # Step 5: Upload the Code to S3
+      - name: Upload Code to S3
+        run: |
+          aws s3 cp prediction_app.zip s3://diagnostic-images-bucket/deployments/prediction_app.zip
+
+      - name: Deploy & Run Docker on EC2 via SSM
+        run: |
+          # Send the SSM command and capture the command ID
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=instanceIds,Values=i-043c8050d6c02f6b4" \
+            --parameters "commands=[
+              'set -e',
+
+              'echo Downloading the latest code from S3...',
+              'aws s3 cp s3://diagnostic-images-bucket/deployments/prediction_app.zip /home/ubuntu/prediction_app.zip --region ${{ secrets.AWS_REGION }}',
+
+              'echo Extracting code...',
+              'mkdir -p /home/ubuntu/app',
+              'rm -rf /home/ubuntu/app/*',
+              'unzip -o /home/ubuntu/prediction_app.zip -d /home/ubuntu/app',
+              'rm -f /home/ubuntu/app.zip',
+
+              'echo Removing old Docker containers and images...',
+              'cd /home/ubuntu/app',
+              'docker-compose down || true',
+              'docker stop $(docker ps -q) || true',
+              'docker rm -f $(docker ps -aq) || true',
+
+              'echo Waiting for all containers to fully stop...',
+              'while [ -n \"$(docker ps -q)\" ]; do sleep 5; echo \"Waiting for containers to stop...\"; done',
+
+              'docker rmi -f diagnostic-ai:latest || true',
+              'docker image prune -af || true',
+
+              'echo Building new Docker image...',
+              'docker build -t diagnostic-ai:latest .',
+
+              'echo Running new Docker container...',
+              'docker-compose up -d',
+
+              'echo Deployment completed successfully!'
+            ]" \
+            --comment "Deploying new Docker image to EC2" \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Command.CommandId" --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for the command to complete
+          while true; do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id i-043c8050d6c02f6b4 \
+              --region ${{ secrets.AWS_REGION }} \
+              --query "Status" --output text)
+
+            echo "Current Status: $STATUS"
+
+            if [ "$STATUS" = "Success" ]; then
+              echo "SSM Command completed successfully!"
+              break
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "SSM Command failed or was cancelled."
+
+              # Print error output
+              echo "Fetching command output..."
+              aws ssm get-command-invocation \
+                --command-id $COMMAND_ID \
+                --instance-id i-043c8050d6c02f6b4 \
+                --region ${{ secrets.AWS_REGION }} \
+                --query "StandardErrorContent" \
+                --output text
+
+              # Optionally print standard output too
+              echo "Fetching standard output..."
+              aws ssm get-command-invocation \
+                --command-id $COMMAND_ID \
+                --instance-id i-043c8050d6c02f6b4 \
+                --region ${{ secrets.AWS_REGION }} \
+                --query "StandardOutputContent" \
+                --output text
+              exit 1
+            else
+              # Wait before checking again
+              sleep 10
+            fi
+          done
+
+  #stop-ec2:
+  #  name: Stop EC2 If Running
+  #  runs-on: ubuntu-latest
+  #  needs: deploy-master  # Ensure this job runs after deployment
+  #  if: always()
+  #
+  #  steps:
+  #    - name: Configure AWS CLI
+  #      uses: aws-actions/configure-aws-credentials@v1
+  #      with:
+  #        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #        aws-region: ${{ secrets.AWS_REGION }}
+  #
+  #    - name: Stop EC2 If Running
+  #      run: |
+  #        INSTANCE_ID="i-043c8050d6c02f6b4"
+  #        STATUS=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].State.Name" --output text)
+  #
+  #        echo "EC2 Instance Status: $STATUS"
+  #
+  #        if [ "$STATUS" == "running" ]; then
+  #          echo "Stopping EC2 instance $INSTANCE_ID..."
+  #          aws ec2 stop-instances --instance-ids $INSTANCE_ID
+  #          aws ec2 wait instance-stopped --instance-ids $INSTANCE_ID
+  #          echo "EC2 instance is now stopped."
+  #        else
+  #          echo "EC2 instance is already in state: $STATUS."
+  #        fi
