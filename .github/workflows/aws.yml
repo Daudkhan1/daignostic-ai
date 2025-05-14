@@ -94,7 +94,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_S3_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AMAZON_S3_REGION_NAME }
+          AWS_DEFAULT_REGION: ${{ secrets.AMAZON_S3_REGION_NAME }}
 
 
 
@@ -115,7 +115,7 @@ jobs:
           REGION=${{ secrets.AMAZON_S3_REGION_NAME }}
           ECR_URI=${{ secrets.ECR_URI }}
           AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-          INSTANCE_ID=i-0747655acaebfa7a7
+          INSTANCE_ID=i-02a859aacad892fd3
 
           # Send the SSM command
           COMMAND_ID=$(aws ssm send-command \
