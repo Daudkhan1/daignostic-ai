@@ -1,6 +1,6 @@
 services:
   diagnostic-ai:
-    image: diagnostic-ai:latest  # Your model's Dockerfile
+    image: 831926608672.dkr.ecr.ap-south-1.amazonaws.com/diagnostic-ai:latest  # Your model's Dockerfile
     ports:
       - "8000:8000"  # Expose port 8000 to the host
     environment:
