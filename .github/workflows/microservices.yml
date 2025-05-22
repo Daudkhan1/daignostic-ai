@@ -88,9 +88,9 @@ jobs:
       - name: Upload docker-stack.yml to S3
         run: |
           if [ "${{ matrix.service }}" = "genai-app" ]; then
-            aws s3 cp GenAIService/backend/docker-stack.yml s3://$S3_BUCKET_NAME/genai-app/docker-compose.yml --region $REGION
+            aws s3 cp GenAIService/backend/docker-stack.yml s3://$S3_BUCKET_NAME/genai-app/docker-stack.yml --region $REGION
           else
-            aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-compose.yml --region $REGION
+            aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-stack.yml --region $REGION
           fi
 
       - name: Deploy Both Services via SSM
