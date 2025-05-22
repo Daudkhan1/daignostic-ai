@@ -76,22 +76,13 @@ jobs:
       # Update docker-stack.yml with the new tag
       - name: Update docker-stack.yml with dynamic tag
         run: |
-          if [ "${{ matrix.service }}" = "genai-app" ]; then
-            cd GenAIService/backend/
-          else
-            cd MicroscopyService/
-          fi
-          
-          sed -i "s|\(image: .*/diagnostic-ai:\).*|\1${{ env.IMAGE_TAG }}|" docker-stack.yml
-          sed -i "s|\(image: .*/microscopy:\).*|\1${{ env.IMAGE_TAG }}|" docker-stack.yml
+          sed -i "s|\(image: .*/diagnostic-ai:\).*|\1${{ env.IMAGE_TAG }}|" GenAIService/backend/docker-stack.yml
+          sed -i "s|\(image: .*/microscopy:\).*|\1${{ env.IMAGE_TAG }}|" MicroscopyService/docker-stack.yml
 
       - name: Upload docker-stack.yml to S3
-        run: |
-          if [ "${{ matrix.service }}" = "genai-app" ]; then
-            aws s3 cp GenAIService/backend/docker-stack.yml s3://$S3_BUCKET_NAME/genai-app/docker-stack.yml --region $REGION
-          else
-            aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-stack.yml --region $REGION
-          fi
+        run: |  
+          aws s3 cp GenAIService/backend/docker-stack.yml s3://$S3_BUCKET_NAME/genai-app/docker-stack.yml --region $REGION
+          aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-stack.yml --region $REGIONGION
 
       - name: Deploy Both Services via SSM
         run: |
