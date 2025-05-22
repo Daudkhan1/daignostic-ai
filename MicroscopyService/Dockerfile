@@ -21,6 +21,11 @@ COPY maanz_medical_ai_models-1.0.0-py3-none-any.whl /app/src/maanz_medical_ai_mo
 RUN /opt/conda/envs/chat_env/bin/pip install maanz_medical_ai_models-1.0.0-py3-none-any.whl --force-reinstall --upgrade
 RUN rm /app/src/maanz_medical_ai_models-1.0.0-py3-none-any.whl
 
+WORKDIR /app/src
+RUN aws s3 cp s3://praid-ai/maanz_medical_ai_models-1.0.0-py3-none-any.whl /app/src/maanz_medical_ai_models-1.0.0-py3-none-any.whl --region ap-south-1
+RUN /opt/conda/envs/chat_env/bin/pip install maanz_medical_ai_models-1.0.0-py3-none-any.whl --force-reinstall --upgrade
+RUN rm /app/src/maanz_medical_ai_models-1.0.0-py3-none-any.whl
+
 # Cleanup of conda env
 RUN /opt/conda/bin/conda clean -afy
 RUN find /opt/conda/ -follow -type f -name '*.a' -delete

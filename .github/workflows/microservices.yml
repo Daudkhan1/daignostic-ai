@@ -53,7 +53,12 @@ jobs:
           aws-access-key-id: ${{ secrets.AMAZON_S3_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AMAZON_S3_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AMAZON_S3_REGION_NAME }}
-
+      
+      - name: Copy .whl file from s3
+        run: |  
+          aws s3 cp s3://praid-ai/maanz_medical_ai_models-1.0.0-py3-none-any.whl MicroscopyService/maanz_medical_ai_models-1.0.0-py3-none-any.whl --region ap-south-1          aws s3 cp s3://praid-ai/maanz_medical_ai_models-1.0.0-py3-none-any.whl GenAIService/backend/maanz_medical_ai_models-1.0.0-py3-none-any.whl --region ap-south-1'
+          aws s3 cp s3://praid-ai/maanz_medical_ai_models-1.0.0-py3-none-any.whl GenAIService/backend/maanz_medical_ai_models-1.0.0-py3-none-any.whl --region ap-south-1
+          
       - name: Build and Push Docker Image to ECR
         run: |
           aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_URI
