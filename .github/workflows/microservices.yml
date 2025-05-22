@@ -23,7 +23,7 @@ jobs:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
       INSTANCE_ID: i-07a7ff0d0e44e03c5
-      IMAGE_TAG: v100   # put your desired image tag here
+      IMAGE_TAG: v12   # put your desired image tag here
 
     steps:
       - name: Checkout code
@@ -82,7 +82,7 @@ jobs:
       - name: Upload docker-stack.yml to S3
         run: |  
           aws s3 cp GenAIService/backend/docker-stack.yml s3://$S3_BUCKET_NAME/genai-app/docker-stack.yml --region $REGION
-          aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-stack.yml --region $REGIONGION
+          aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-stack.yml --region $REGIOn
 
       - name: Deploy Both Services via SSM
         run: |
