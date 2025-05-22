@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  genai-app:
+    image: 831926608672.dkr.ecr.ap-south-1.amazonaws.com/genai-app:latest
+    ports:
+      - "8001:8001"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+        monitor: 30s
+      restart_policy:
+        condition: on-failure

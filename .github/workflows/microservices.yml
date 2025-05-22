@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "main"
+      - "rollback"
 
 jobs:
   build-and-deploy:
@@ -21,7 +22,8 @@ jobs:
       ECR_URI: ${{ secrets.ECR_URI }}
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
-      INSTANCE_ID: i-02a859aacad892fd3
+      INSTANCE_ID: i-07a7ff0d0e44e03c5
+      IMAGE_TAG: v100   # put your desired image tag here
 
     steps:
       - name: Checkout code
@@ -62,46 +64,58 @@ jobs:
             cd MicroscopyService/
           fi
 
-          docker build -t ${{ matrix.service }}:latest .
-          docker tag ${{ matrix.service }}:latest $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/${{ matrix.service }}:latest
-          docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/${{ matrix.service }}:latest
+          docker build -t ${{ matrix.service }}:${{ env.IMAGE_TAG }} .
+          docker tag ${{ matrix.service }}:${{ env.IMAGE_TAG }} $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/${{ matrix.service }}:${{ env.IMAGE_TAG }}
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/${{ matrix.service }}:${{ env.IMAGE_TAG }}
 
-      - name: Upload docker-compose.yml to S3
+      # Update docker-stack.yml with the new tag
+      - name: Update docker-stack.yml with dynamic tag
         run: |
           if [ "${{ matrix.service }}" = "genai-app" ]; then
-            aws s3 cp GenAIService/backend/docker-compose.yml s3://$S3_BUCKET_NAME/genai-app/docker-compose.yml --region $REGION
+            cd GenAIService/backend/
           else
-            aws s3 cp MicroscopyService/docker-compose.yml s3://$S3_BUCKET_NAME/microscopy/docker-compose.yml --region $REGION
+            cd MicroscopyService/
           fi
+          
+          sed -i "s|\(image: .*/diagnostic-ai:\).*|\1${{ env.IMAGE_TAG }}|" docker-stack.yml
 
-      - name: Deploy ${{ matrix.service }} on EC2 via SSM
+      - name: Upload docker-stack.yml to S3
         run: |
           if [ "${{ matrix.service }}" = "genai-app" ]; then
-            SERVICE_DIR="genai-app"
+            aws s3 cp GenAIService/backend/docker-stack.yml s3://$S3_BUCKET_NAME/genai-app/docker-compose.yml --region $REGION
           else
-            SERVICE_DIR="microscopy"
+            aws s3 cp MicroscopyService/docker-stack.yml s3://$S3_BUCKET_NAME/microscopy/docker-compose.yml --region $REGION
           fi
 
+      - name: Deploy Both Services via SSM
+        run: |
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=instanceIds,Values=${INSTANCE_ID}" \
             --parameters "commands=[
               'set -e',
-              'mkdir -p /home/ubuntu/${SERVICE_DIR}',
-              'echo Downloading ${SERVICE_DIR} docker-compose.yml from S3...',
-              'aws s3 cp s3://${S3_BUCKET_NAME}/${SERVICE_DIR}/docker-compose.yml /home/ubuntu/${SERVICE_DIR}/docker-compose.yml --region ${REGION}',
+              'echo Enabling Docker Swarm...',
+              'docker swarm init || echo Already initialized',
+
+              'mkdir -p /home/ubuntu/genai-app',
+              'mkdir -p /home/ubuntu/microscopy',
+
+              'echo Downloading docker-stack.yml files from S3...',
+              'aws s3 cp s3://${S3_BUCKET_NAME}/genai-app/docker-compose.yml /home/ubuntu/genai-app/docker-stack.yml --region ${REGION}',
+              'aws s3 cp s3://${S3_BUCKET_NAME}/microscopy/docker-compose.yml /home/ubuntu/microscopy/docker-stack.yml --region ${REGION}',
+
               'echo Logging into ECR...',
               'aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_URI}',
-              'echo Pulling new image...',
-              'docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${SERVICE_DIR}:latest',
-              'echo Stopping existing containers...',
-              'docker-compose -f /home/ubuntu/${SERVICE_DIR}/docker-compose.yml down || true',
-              'echo Starting new containers...',
-              'docker-compose -f /home/ubuntu/${SERVICE_DIR}/docker-compose.yml up -d',
-              'docker system prune -f || true',
-              'echo Deployment of ${SERVICE_DIR} complete.'
+
+              'echo Deploying genai-app...',
+              'docker stack deploy -c /home/ubuntu/genai-app/docker-stack.yml --with-registry-auth genaiapp',
+
+              'echo Deploying microscopy...',
+              'docker stack deploy -c /home/ubuntu/microscopy/docker-stack.yml --with-registry-auth microscopy',
+
+              'echo Deployment of both services complete!'
             ]" \
-            --comment "Deploying ${SERVICE_DIR} via GitHub Actions" \
+            --comment "Deploy both stacks to EC2 using Docker Swarm" \
             --region "$REGION" \
             --query "Command.CommandId" --output text)
 
@@ -117,10 +131,10 @@ jobs:
 
             echo "Current Status: $STATUS"
             if [ "$STATUS" = "Success" ]; then
-              echo "Deployment successful for $SERVICE_DIR"
+              echo "Deployment successful for both services"
               break
             elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
-              echo "SSM command failed or was cancelled for $SERVICE_DIR"
+              echo "SSM command failed or was cancelled"
               aws ssm get-command-invocation \
                 --command-id $COMMAND_ID \
                 --instance-id $INSTANCE_ID \
