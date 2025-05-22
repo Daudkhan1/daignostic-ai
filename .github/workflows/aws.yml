@@ -80,7 +80,10 @@ jobs:
         run: |
           # Log in to ECR
           aws ecr get-login-password --region ${{ secrets.AMAZON_S3_REGION_NAME }} | docker login --username AWS --password-stdin ${{ secrets.ECR_URI }}
-
+          
+          # Go to the Dockerfile's directory.
+          cd PredictionService
+          
           # Build Docker image with dynamic tag
           docker build -t diagnostic-ai:${{ env.IMAGE_TAG }} .
 
