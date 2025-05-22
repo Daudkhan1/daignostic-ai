@@ -107,8 +107,8 @@ jobs:
               'mkdir -p /home/ubuntu/microscopy',
 
               'echo Downloading docker-stack.yml files from S3...',
-              'aws s3 cp s3://${S3_BUCKET_NAME}/genai-app/docker-compose.yml /home/ubuntu/genai-app/docker-stack.yml --region ${REGION}',
-              'aws s3 cp s3://${S3_BUCKET_NAME}/microscopy/docker-compose.yml /home/ubuntu/microscopy/docker-stack.yml --region ${REGION}',
+              'aws s3 cp s3://${S3_BUCKET_NAME}/genai-app/docker-stack.yml /home/ubuntu/genai-app/docker-stack.yml --region ${REGION}',
+              'aws s3 cp s3://${S3_BUCKET_NAME}/microscopy/docker-stack.yml /home/ubuntu/microscopy/docker-stack.yml --region ${REGION}',
 
               'echo Logging into ECR...',
               'aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_URI}',
