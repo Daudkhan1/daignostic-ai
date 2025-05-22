@@ -7,12 +7,22 @@ services:
       - DATA_MODEL_PATH=/app/AIModels/data/weights/model_weights_od.pth
       - DATA_RADIOLOGY_MODEL_PATH=/app/AIModels/data/weights/radiology_yolo.pth
     deploy:
+      mode: replicated
+      replicas: 1
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: 1
               capabilities: [ gpu ]
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+        monitor: 30s
+      restart_policy: 
+        condition: on-failure
     runtime: nvidia
     networks:
       - app-network

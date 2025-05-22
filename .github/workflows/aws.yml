@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - "main"
+      - "rollback"
+
+env:
+  IMAGE_TAG: v100   # put your desired image tag here
 
 jobs:
   deploy-master:
@@ -46,7 +50,7 @@ jobs:
       # Step 3: Ensure EC2 Instance is Running
       - name: Start EC2 if stopped and wait until running
         run: |
-          INSTANCE_ID="i-02a859aacad892fd3"
+          INSTANCE_ID="i-07a7ff0d0e44e03c5"
 
           # Get the instance state correctly
           STATUS=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].State.Name" --output text)
@@ -76,64 +80,53 @@ jobs:
         run: |
           # Log in to ECR
           aws ecr get-login-password --region ${{ secrets.AMAZON_S3_REGION_NAME }} | docker login --username AWS --password-stdin ${{ secrets.ECR_URI }}
-         
-          # Go to the PredictionService directory
-          cd PredictionService
 
-          # Build Docker image
-          docker build -t diagnostic-ai:latest .
+          # Build Docker image with dynamic tag
+          docker build -t diagnostic-ai:${{ env.IMAGE_TAG }} .
 
-          # Tag the image
-          docker tag diagnostic-ai:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AMAZON_S3_REGION_NAME }}.amazonaws.com/diagnostic-ai:latest
+          # Tag the image for ECR
+          docker tag diagnostic-ai:${{ env.IMAGE_TAG }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AMAZON_S3_REGION_NAME }}.amazonaws.com/diagnostic-ai:${{ env.IMAGE_TAG }}
 
-          # Push the Docker image to ECR
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AMAZON_S3_REGION_NAME }}.amazonaws.com/diagnostic-ai:latest
+          # Push the Docker image to ECR with dynamic tag
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AMAZON_S3_REGION_NAME }}.amazonaws.com/diagnostic-ai:${{ env.IMAGE_TAG }}
 
-
-      # Step 5: Upload docker-compose.yml to S3
-      - name: Upload docker-compose.yml to S3
+      # Step 4: Update docker-stack.yml with the new tag
+      - name: Update docker-stack.yml with dynamic tag
         run: |
-          aws s3 cp PredictionService/docker-compose.yml s3://${{ secrets.S3_BUCKET_NAME }}/docker-compose.yml --region ${{ secrets.AMAZON_S3_REGION_NAME }}
+          sed -i "s|\(image: .*/diagnostic-ai:\).*|\1${{ env.IMAGE_TAG }}|" PredictionService/docker-stack.yml
+
+
+      # Step 5: Upload docker-stack.yml to S3 (Swarm stack file)
+      - name: Upload docker-stack.yml to S3
+        run: |
+          aws s3 cp PredictionService/docker-stack.yml s3://${{ secrets.S3_BUCKET_NAME }}/docker-stack.yml --region ${{ secrets.AMAZON_S3_REGION_NAME }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_S3_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AMAZON_S3_REGION_NAME }}
 
-      # Step 5: Deploy Docker on EC2 via SSM
-      - name: Deploy Docker on EC2 via SSM
+      # Step 5: Deploy Docker Stack on EC2 via SSM (Docker Swarm)
+      - name: Deploy Docker Stack via SSM
         run: |
-          # Assign GitHub secrets to shell variables
           S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}
           REGION=${{ secrets.AMAZON_S3_REGION_NAME }}
           ECR_URI=${{ secrets.ECR_URI }}
           AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-          INSTANCE_ID=i-02a859aacad892fd3
+          INSTANCE_ID=i-07a7ff0d0e44e03c5
 
-          # Send the SSM command
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=instanceIds,Values=${INSTANCE_ID}" \
             --parameters "commands=[
               'set -e',
-
-              'echo Downloading the docker-compose.yml from S3...',
-              'aws s3 cp s3://${S3_BUCKET_NAME}/docker-compose.yml /home/ubuntu/docker-compose.yml --region ${REGION}',
-
-              'echo Stopping and removing old Docker containers...',
-              'docker-compose -f /home/ubuntu/docker-compose.yml down',
-
+              'echo Enabling Docker Swarm...',
+              'docker swarm init || echo Already initialized',
+              'echo Downloading the docker-stack.yml from S3...',
+              'aws s3 cp s3://${S3_BUCKET_NAME}/docker-stack.yml /home/ubuntu/docker-stack.yml --region ${REGION}',
               'echo Logging into ECR...',
-              'aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_URI}',
-
-              'echo Pulling the new Docker image...',
-              'docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/diagnostic-ai:latest',
-
-              'echo Starting the containers with new image...',
-              'docker-compose -f /home/ubuntu/docker-compose.yml up -d',
-
-              'echo Cleaning up unused images...',
-              'docker system prune -f || true',
-
+              'aws ecr get-login-password --region ${REGION} | sudo docker login --username AWS --password-stdin ${ECR_URI}',
+              'echo Deploying with Docker Stack...',
+              'sudo docker stack deploy -c /home/ubuntu/docker-stack.yml --with-registry-auth diagnostic-ai',
               'echo Deployment complete!'
             ]" \
             --comment "Deploying new Docker image to EC2" \
