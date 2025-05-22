@@ -76,7 +76,7 @@ jobs:
       # Update docker-stack.yml with the new tag
       - name: Update docker-stack.yml with dynamic tag
         run: |
-          sed -i "s|\(image: .*/diagnostic-ai:\).*|\1${{ env.IMAGE_TAG }}|" GenAIService/backend/docker-stack.yml
+          sed -i "s|\(image: .*/genai-app:\).*|\1${{ env.IMAGE_TAG }}|" GenAIService/backend/docker-stack.yml
           sed -i "s|\(image: .*/microscopy:\).*|\1${{ env.IMAGE_TAG }}|" MicroscopyService/docker-stack.yml
 
       - name: Upload docker-stack.yml to S3
